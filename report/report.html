@@ -1,0 +1,117 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Morphaca</title>
+    <link href="css/bootstrap.css" rel="stylesheet"/>
+  </head>
+  <body>
+    <script type="text/x-creole-wiki" id="report">
+
+== Introduction
+In this homework, we implement the tool of morphing in C++ with openCV.
+We implement many kinds of functions. For interpolation part, there are
+direct interpolation, bilinear interpolation and gaussian interpolation.
+We also provide multi-source morphing(polymorphing) and auto-face detection
+morphing.
+
+The hierarchy of our source is
+
+{{{
+./morph
+	main.cpp
+	morph_lib.h
+	morph_lib.cpp
+	parser.h
+	parser.cpp
+	Makefile
+}}}
+== A typical morphing result
+
+{{ img/demo.gif | demo ~||width=30%}}
+
+== Open Source
+The whole source, including a website GUI, is open source (by us) and you can do download it on internet.
+
+* [[https://github.com/xflash96/morphaca | Morphaca: A morphing library]]
+* [[https://github.com/xflash96/pyramid_mongo_rest | Web Framework]]
+
+    </script>
+    
+    <div class="navbar navbar-fixed-top">
+      <div class="navbar-inner">
+        <div class="container">
+          <a class="btn btn-navbar" data-toggle="collapse" data-target=".nav-collapse">
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </a>
+          <a class="brand" href="#">Morphaca</a>
+          <div class="nav-collapse">
+            <ul class="nav">
+              <li><a href="#report">Report</a></li>
+            </ul>
+          </div><!--/.nav-collapse -->
+        </div>
+      </div>
+    </div>
+
+    <div class="container">
+        <div id="content">
+		<div class="row" id="wiki"></div>
+	</div>
+        <footer>
+        <p>VFX 2012 Spring Homework 1</p>
+        </footer>
+    </div> <!-- /container -->
+
+    <!-- Le javascripts -->
+    <script src="http://cdnjs.cloudflare.com/ajax/libs/modernizr/2.5.3/modernizr.min.js"></script>
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1/jquery.min.js"></script>
+    <script src="http://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.3.1/underscore-min.js"></script>
+    <script src="http://cdnjs.cloudflare.com/ajax/libs/backbone.js/0.9.1/backbone-min.js"></script>
+    <script src="http://cdnjs.cloudflare.com/ajax/libs/json2/20110223/json2.js"></script>
+    <script src="http://cdnjs.cloudflare.com/ajax/libs/handlebars.js/1.0.0.beta2/handlebars.min.js"></script>
+    <script src="http://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/2.0.2/bootstrap.min.js"></script>
+    <script src="js/jquery.form.min.js"></script>
+    <script src="js/creole.js"></script>
+    <script src="js/load-image.js"></script>
+    <script src="js/bootstrap-carousel.js"></script>
+    <script type="text/javascript" src="js/latexit.js"></script>
+    <script type="text/javascript" src="http://cdnjs.cloudflare.com/ajax/libs/prettify/188.0.0/prettify.js"></script>
+    <script type="text/javascript">
+	(function(){
+	    var getMarkup = function(data){
+		var div = $('#wiki')[0];
+       	        var creole = new Parse.Simple.Creole({
+		    forIE: document.all,
+	        });
+		creole.parse(div, data);
+		prettyPrint();
+		LatexIT.render('span');
+	    };
+	    getMarkup($('#report').text());
+	})();
+    </script>
+    <!-- Le debugs
+    <meta http-equiv="cache-control" content="no-cache">
+    -->
+
+    <!-- Le styles -->
+    <style>
+      body {
+        padding-top: 60px; /* 60px to make the container go all the way to the bottom of the topbar */
+      }
+    </style>
+    <link href="css/bootstrap-responsive.css" rel="stylesheet"/>
+    <link href="css/prettify.css" rel="stylesheet"/>
+    <!--
+    <script src="/static/js/bootstrap-transition.js"></script>
+    <script src="/static/js/bootstrap-tab.js"></script>
+    <script src="/static/js/bootstrap-tooltip.js"></script>
+    <script src="/static/js/bootstrap-popover.js"></script>
+    <script src="/static/js/bootstrap-typeahead.js"></script>
+    -->
+
+  </body>
+</html>

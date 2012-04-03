@@ -1,0 +1,4 @@
+== Instructions ==
+
+To download all the test data:
+	$ make download
