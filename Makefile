@@ -19,3 +19,6 @@ download:
 fetch:
 	git submodule init
 	git submoudle update
+	cd ext/flann;\
+	cmake -DCMAKE_INSTALL_PREFIX:PATH=dst -DBUILD_C_BINDINGS=false -DBUILD_PYTHON_BINDINGS=false .. ;\
+	make; make install; mv ext/flann/dst/include/flann src/flann
