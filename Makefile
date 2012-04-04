@@ -15,3 +15,7 @@ download:
 	unzip "*.zip";\
 	rm *.zip
 	
+.PHONY: fetch
+fetch:
+	git submodule init
+	git submoudle update

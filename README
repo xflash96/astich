@@ -1,4 +1,7 @@
 == Instructions ==
 
+To build the program:
+	$ make fetch # fetch src/flann
+
 To download all the test data:
 	$ make download
