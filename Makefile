@@ -18,7 +18,9 @@ download:
 .PHONY: fetch
 fetch:
 	git submodule init
-	git submoudle update
+	git submodule update
 	cd ext/flann;\
+	mkdir build; cd build;\
 	cmake -DCMAKE_INSTALL_PREFIX:PATH=dst -DBUILD_C_BINDINGS=false -DBUILD_PYTHON_BINDINGS=false .. ;\
-	make; make install; mv ext/flann/dst/include/flann src/flann
+	make; make install
+	mv ext/flann/build/dst/include/flann src/flann
