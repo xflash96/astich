@@ -1,7 +1,8 @@
 CC=g++
 CFLAGS=$(shell pkg-config opencv --cflags) -g -Wall -Wconversion  -O3
 CPPFLAGS=$(CFLAGS)
-LDFLAGS=$(shell pkg-config opencv --libs) -lm -O3
+FLANN_ROOT=../ext/flann/build/dst/lib64
+LDFLAGS=$(shell pkg-config opencv --libs) -lm -O3 -L ${FLANN_ROOT} -lflann_cpp
 
 all: astich
 astich: astich.o
