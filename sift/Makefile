@@ -1,7 +1,7 @@
 CC=g++
 CFLAGS=$(shell pkg-config opencv --cflags) -g -Wall -Wconversion 
 CPPFLAGS=$(CFLAGS)
-LDFLAGS=$(shell pkg-config opencv --libs) -lm
+LDFLAGS=$(shell pkg-config opencv --libs) -lm -g
 
 all: main.o sift_lib.o 
 	${CC} sift_lib.o main.o ${CPPLAGS} ${LDFLAGS} -o sift

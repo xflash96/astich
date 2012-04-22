@@ -5,7 +5,6 @@
 #include <set>
 #include <cstring>
 #include <algorithm>
-#include <vector>
 #include "sift_lib.h"
 
 using namespace cv;
@@ -18,9 +17,6 @@ void sift( Mat &img_src )
 	bool **final_feature ;
 	Mat imgGray ;
 	Mat DoGs[OCTAVES+1][S+2], Layers[OCTAVES+1][S+3] ;
-	double Sigmas[ OCTAVES+1 ][ S+3 ] ;
-	vector<KEY> keypoint_list ;
-	vector<DESCRIPT> descriptor ;
 
 	isfeature = new Mat**[ OCTAVES ] ;
 	for( int i=0 ; i<OCTAVES ; i++ )
@@ -33,10 +29,10 @@ void sift( Mat &img_src )
 	}
 
 	cvtColor(img_src, imgGray, CV_RGB2GRAY);
-	GenerateDoG( imgGray, Layers, DoGs, Sigmas ) ;
+	GenerateDoG( imgGray, Layers, DoGs ) ;
 	DetectFeatures( imgGray, Layers, DoGs, final_feature ) ;
-	ComputeOrientation( Layers, Sigmas, keypoint_list ) ;
-	GenerateFeatures( Layers, keypoint_list, descriptor ) ;
+	ComputeOrientation( Layers ) ;
+	//GenerateFeatures() ;
 
 
 	cerr << "Output\n" ;
@@ -98,17 +94,17 @@ void gaussianBlur( Mat &src, Mat &dst, int r, float g_weight[][MAX_R] )
 			dst.at<float>(i,j) = pixel/total_w ;
 		}
 }
-void GenerateDoG( Mat &img_src, Mat Layers[][S+3], Mat DoGs[][S+2], double Sigmas[][S+3] ) 
+void GenerateDoG( Mat &img_src, Mat Layers[][S+3], Mat DoGs[][S+2] ) 
 {
 	cerr << "Generate DoGs\n" ;
-	//int r ;
+	int r ;
 	double sigma, sigma_f, initial_sigma ;
 	Mat img, img_tmp ;
 
 
 	img_src.convertTo( img, CV_32FC1, 1) ;
 	img_tmp = img ;
-	//r = (int)( 2*SIGMA_ANT+1e-7 ) ;
+	r = (int)( 2*SIGMA_ANT+1e-7 ) ;
 	//compute_gaussian_weight( SIGMA_ANT ) ;
 	//gaussianBlur( img, img_tmp, r, (float (*)[MAX_R])&gaussian_weight[r][r]) ; 
 	GaussianBlur( img, img_tmp, Size(0,0), SIGMA_ANT, 0 ) ;
@@ -124,7 +120,6 @@ void GenerateDoG( Mat &img_src, Mat Layers[][S+3], Mat DoGs[][S+2], double Sigma
 
 	initial_sigma = sqrt( (2*SIGMA_ANT)*(2*SIGMA_ANT) + SIGMA_PRE*SIGMA_PRE );
 	Layers[0][0] = img ;
-	Sigmas[0][0] = initial_sigma*0.5 ;
 	for( int k=0 ; k<OCTAVES ; k++ )
 	{
 		cerr << "octave " << k << endl ;
@@ -134,7 +129,6 @@ void GenerateDoG( Mat &img_src, Mat Layers[][S+3], Mat DoGs[][S+2], double Sigma
 			cerr << "s " << i << endl ;
 			sigma_f = sqrt( pow(2, 2.0/S) - 1)*sigma ;
 			sigma *= pow( 2, 1.0/S ) ;
-			Sigmas[k][i] = sigma * 0.5 *pow( 2.0f, (float)i ) ;
 			Layers[k][i]= Mat::zeros( Layers[k][i-1].rows, Layers[k][i-1].cols, CV_32FC1 )  ;
 			isfeature[k][ i-1 ] = new Mat( Mat::zeros(Layers[k][i-1].rows, Layers[k][i-1].cols, CV_8UC1) );
 			//r = (int)(2*sigma_f) ;
@@ -145,11 +139,7 @@ void GenerateDoG( Mat &img_src, Mat Layers[][S+3], Mat DoGs[][S+2], double Sigma
 		cerr << "generate DoGs\n" ;
 		for( int i=0 ; i<S+2 ; i++ )
 			DoGs[k][i] = Layers[k][i+1]-Layers[k][i] ;
-		if( k<OCTAVES-1 )
-		{
-			resize( Layers[k][0], Layers[k+1][0], Size(0,0), 0.5, 0.5 ) ;
-			Sigmas[k+1][0] = Sigmas[k][S] ;
-		}
+		resize( Layers[k][0], Layers[k+1][0], Size(0,0), 0.5, 0.5 ) ;
 	}
 }
 
@@ -250,105 +240,17 @@ bool is_low_contrast_or_edge( Mat &DoG, int i, int j )
 		return true ;
 	return false ;
 }
-void ComputeOrientation( Mat Layers[][S+3], double Sigmas[][S+3], vector<KEY> &keypoint_list ) 
+void ComputeOrientation( Mat Layers[][S+3] )
 {
-	cerr << "Compute Orientation" << endl ;
-	Mat Orient[ OCTAVES ][ S+2 ] ;
-	Mat Magnitude[ OCTAVES ][ S+2 ] ;
-	Mat X = Mat( 3, 3, CV_32FC1 ) ;
-	Mat Y = Mat( 3, 1, CV_32FC1 ) ;
-	Mat A ;
-	Mat magBlur ;
-	double max_peak_w, hist[BINS] ;
-	float dx, dy, ori ;
-	int window_size, scale, degree ;
-	scale = 1 ;
-	for( int k=0 ; k<OCTAVES ; k++, scale *= 2 )
-	{
-		cerr << k << endl ;
-		for( int idx=1 ; idx<S+1 ; idx++ )
-		{
-			Orient[k][idx-1] = Mat::zeros( Layers[k][0].rows, Layers[k][0].cols, CV_32FC1 ) ;
-			Magnitude[k][idx-1] = Mat::zeros( Layers[k][0].rows, Layers[k][0].cols, CV_32FC1 ) ;
-			for( int x=1 ; x<Layers[k][0].rows-1 ; x++ )
-				for( int y=1 ; y<Layers[k][0].cols-1 ; y++ )
-				{
-					dx = Layers[k][idx].at<float>( x+1, y)-Layers[k][idx].at<float>( x-1, y);
-					dy = Layers[k][idx].at<float>( x, y+1)-Layers[k][idx].at<float>( x, y-1);
-					Magnitude[k][idx-1].at<float>( x, y )=sqrt( dx*dx+dy*dy ) ;
-					Orient[k][idx-1].at<float>( x, y ) = atan( dy/dx ) ;
-				}
-			GaussianBlur( Magnitude[k][idx-1], magBlur, Size(0,0), Sigmas[k][idx]*1.5, 0 ) ;
-			window_size = (int)(Sigmas[k][idx]*1.5*9) ;
-			for( int x=0 ; x<Layers[k][0].rows ; x++ )
-				for( int y=0 ; y<Layers[k][0].cols ; y++ )
-					if( isfeature[k][idx-1]->at<char>(x,y) == 1 )
-					{
-						memset( hist, 0, BINS*sizeof(double) ) ;
-						for( int x1 = -window_size ; x1<=window_size ; x1++ )
-							for( int y1 = -window_size ; y1<=window_size ; y1++ )
-							{
-								if( x+x1<0 || y+y1<0 ||
-								    x+x1>=Layers[k][0].rows || 
-								    y+y1>=Layers[k][0].cols )
-									continue ;
-								ori = Orient[k][idx-1].at<float>( x1+x, y1+y ) ;
-								ori += PI ;
-								degree = int(ori/PI*180) ;
-								hist[ (int)(degree/( 360/BINS) ) ] += magBlur.at<float>( x1+x, y1+y ) ;
-							}
-						max_peak_w = hist[0] ;
-						for( int i=1 ; i<BINS ; i++ )
-							if( hist[i]>max_peak_w )
-							{
-								max_peak_w = hist[i] ;
-							}
-						for( int i=0 ; i<BINS ; i++ )
-						{
-							if( hist[i]>0.8*max_peak_w)
-							{
-								for( int j=0 ; j<3 ; j++ )
-								{
-									X.at<float>( j, 0 ) = (float)((i-j-1)*(i-j-1)) ;
-									X.at<float>( j, 1 ) = (float)(i-j-1) ;
-									X.at<float>( j, 2 ) = 1.0f;
-									Y.at<float>( j, 0 ) = (float)hist[ (i-j-1+BINS)%BINS ] ;
-								}
-								A = (X.inv())*( Y ) ;
-								ori = -A.at<float>(1,0)/( 2*A.at<float>(0,0) ) ;
-								if( abs(ori) > 2*BINS )
-									ori = (float)i ;
-								while( ori < 0 )
-									ori += BINS ;
-								while( ori >= BINS )
-									ori -= BINS ;
-								keypoint_list.push_back( KEY( x*scale/2, 
-								                              y*scale/2,
-											      ori,
-											      (float)hist[i],
-											      k, idx) ) ;
-							}
-						}
-					}
-
-		}
-	}
-}
-
-void GenerateFeatures(  Mat Layers[][S+3], vector<KEY> &keypoint_list, vector<DESCRIPT> &descriptor ) 
-{
-	cerr << "Generate features\n" ;
-	//create interpolated image
-	MAT interpolated_mag[ OCTAVES ][ S+3 ] ;
-	MAT interpolated_ori[ OCTAVES ][ S+3 ] ;
-	int width, height ;
+	Mat orient[ OCTAVES ][ S+3 ] ;
+	Mat magnitude[ OCTAVES ][ S+3 ] ;
+	float mag ;
 	for( int k=0 ; k<OCTAVES ; k++ )
 	{
-		width = Layers[k][0].rows ;
-		height = Layers[k][1].cols ;
-		for( int idx=1 ; idx<S+1 ; idx++ )
+		for( int i=1 ; i<S+3 ; i++ )
 		{
-			
+			orient
+			mag = sqrt(  )
 		}
 	}
 }
