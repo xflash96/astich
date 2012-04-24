@@ -9,23 +9,86 @@
     <script type="text/x-creole-wiki" id="report">
 
 == Introduction
-In this homework, we implement the tool of morphing in C++ with openCV.
-We implement many kinds of functions. For interpolation part, there are
-direct interpolation, bilinear interpolation and gaussian interpolation.
-We also provide multi-source morphing(polymorphing) and auto-face detection
-morphing.
-
+In this homework, we implement the tool of stitching in C++ with openCV.
 The hierarchy of our source is
 
 {{{
-./morph
-	main.cpp
-	morph_lib.h
-	morph_lib.cpp
-	parser.h
-	parser.cpp
-	Makefile
+
 }}}
+== Feature Detection
+In this project, we implement Scale Invariant Feature Transform(SIFT) to extract
+features. There are 4 main steps of SIFT: build scale space, detect keypoints, 
+assign major orientation, feature extraction. There are lots of details to handel
+and consider during the implementation. We not only read the course silde, but
+the original paper `Distinctive Image Features from Scale-Invariant Keypoints` 
+from Lowe. We will discuss each of main steps at the first, and some practical 
+issues and the details later.
+=== 4 Main Steps
+   
+ 
+==== Build Scale Space
+To achieve scale invariant, SIFT generates pyramids on different scale 
+level. For each level, it interpolates some layers to make the performance
+more robust. We use the function  to build them all. We can subject two
+consecutive layers to get DoGs for keypoint detection. We do it by GenerateDoG().
+
+
+==== Detect Keypoint
+After building pyramids on different scale level and getting the DoGs, we
+treat the local maximum across DoGs as the keypoints. To get a more robust
+keypoints, SIFT throws out the low contrast samples and eliminates the
+edges. We do it by DetectFeatures(), check_local_maximal() and is_low_contrast_or_edge().
+
+==== Assign Orientation
+For each keypoint, we compute the orientation and magnitude of gradient of
+surrounding points. The surrounding window size depends on the value of sigmas.
+To avoid biundary case may affect the result too much, SIFT applies a gaussion 
+filter on the gradient magnitudes. SIFT splits the orientation angels into 
+36 bins, and do weighted voting the determine the major orientation . We do it by
+ComputeOrientation().
+
+==== Feature Extraction
+SIFT split the surrounding 16*16 windws into 16 4*4 small windows. FOr each
+window, it split the angels into 8 bins and do weighted voting on it. Notice 
+that the orientation is the relative orientation to the major orientation here.
+Hence we can get 16*8 = 128 features at the end. We do it by GenerateFeatures().
+
+=== Some Practical issues and the difficuties we faced
+
+==== Gray scale image
+Such feature extraction algorithms can only handle gray scale cases, for RGB
+images, it tolds us that is a extended research problems. We are not sure
+how this problem is solved. If the features extracted from gray scale is stable,
+does it worth to do that?
+
+==== Build Scale on different size 
+SIFT applies diiferent sigma on the figure, the effect is equivalent to we
+generate diiferent scale images. So each we update the sigma by 
+sigma = sigma*pow( 2, 1/S ). However, in practice, we scale the image by 
+doubling or halving it in each octaves. And the sigma in each octave is
+a fixed sequence, such like 1.4, 2, 2.8, 4 in our implementation. The 
+reason is the effect of gaussian filtering is accumulated.
+
+==== Pyramid
+By above, we need to doubling or scaling down the image across different 
+octaves. To accumulate the effect of gaussian, it can't use the simple 
+resize method. Such simple resize method may be bi-linear or tri-linear 
+by default in many libraries. The words pyramid implies the gaussian 
+filtering.
+
+==== Pre-smoothing
+Here are 2 times pre-smoothing in many practical guide ot implementation.
+First, before we doubling the original image for the base image in the 
+octaves, pre-smooth it. Second, after doubling, pre-smooth it again.
+The original paper does not mention the first pre-smoothing stage, but 
+the performance is better with 2 stages approaches.
+
+==== Downward parabola fitting for peak detection
+As the throwing out low constrast samples in feature detections, for each 
+candidate peak( local maximum and magnitude > 0.8*max peak ),we use its
+left and right neighbors to fit a downward parabola curve and fin the 
+position of maximum peak in that curve.
+
 == A typical morphing result
 
 {{ img/demo.gif | demo ~||width=30%}}
@@ -61,7 +124,7 @@ The whole source, including a website GUI, is open source (by us) and you can do
 		<div class="row" id="wiki"></div>
 	</div>
         <footer>
-        <p>VFX 2012 Spring Homework 1</p>
+        <p>VFX 2012 Spring Homework 2</p>
         </footer>
     </div> <!-- /container -->
 
