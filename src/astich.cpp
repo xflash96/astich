@@ -113,7 +113,8 @@ void getAllFeatures(int n_imgs, char** img_fnames, const char *features_fname, v
 	fs.release();
 }
 
-bool size_icmp(const vector<DMatch>& i, const vector<DMatch>& j)
+template <class _T>
+bool size_icmp(const vector<_T>& i, const vector<_T>& j)
 {
 	return i.size()>j.size();
 }
@@ -139,13 +140,17 @@ vector<vector<DMatch> >* getConnectedImgFeat(int n_imgs, vector<Mat> &descrs, Fl
 		}
 	}
 
-	sort(*img_matches, size_icmp);
+	sort(*img_matches, size_icmp<DMatch>);
 	if (n_connected_imgs >= n_imgs)
 		n_connected_imgs = n_imgs-1;
 
 	img_matches->erase(img_matches->begin()+n_connected_imgs,
 			  img_matches->end());
 	for (int i=0; i<(int)img_matches->size(); i++) {
+		if (0==(int)(*img_matches)[i].size()) {
+			img_matches->erase(img_matches->begin()+i, img_matches->end());
+			break;
+		}
 		INFO("%d->%d: %d", i, (*img_matches)[i][0].imgIdx, (int)(*img_matches)[i].size());
 	}
 	return img_matches;
@@ -171,10 +176,14 @@ vector<int> random_sample_idx(int max_idx, int n)
 	return samples;
 }
 
-void matches_idx_to_mat(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matches, vector<int>& idxes, Mat& src, Mat& dst)
+void matches_idx_to_mat(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matches, vector<int>& idxes, Mat& src, Mat& dst, bool dst_homo=false)
 {
 	src = Mat((int)idxes.size(), 3, CV_32FC1);
-	dst = Mat((int)idxes.size(), 2, CV_32FC1);
+	if (dst_homo) {
+		dst = Mat((int)idxes.size(), 3, CV_32FC1);
+	} else {
+		dst = Mat((int)idxes.size(), 2, CV_32FC1);
+	}
 	for (int i=0; i<(int)idxes.size(); i++) {
 		DMatch &dm = matches[idxes[i]];
 		int src_feat_idx = dm.queryIdx;
@@ -190,9 +199,21 @@ void matches_idx_to_mat(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>&
 		pt = keypoints[dst_img_idx].at<Point2f>(dst_feat_idx, 0);
 		dst.at<float>(i, 0) = pt.x;
 		dst.at<float>(i, 1) = pt.y;
+		if (dst_homo) {
+			dst.at<float>(i, 2) = 1;
+		}
 	}
 }
 
+// Lazy method
+void matches_to_mat(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matches, Mat& src, Mat& dst, bool dst_homo=false)
+{
+	vector<int> all_idxes;
+	for (size_t i=0; i<matches.size(); i++) {
+		all_idxes.push_back((int)i);
+	}
+	matches_idx_to_mat(src_img_idx, keypoints, matches, all_idxes, src, dst, dst_homo);
+}
 
 /* src*H = dst
  */
@@ -203,7 +224,7 @@ Mat calc_homography(Mat& src, Mat &dst)
 	return (src.t()*src).inv()*src.t()*dst;
 }
 
-void homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matches, float good_err, int good_n, int max_iter, vector<DMatch>& inliers, Mat homo)
+bool homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matches, float good_err, int good_n, int max_iter, vector<DMatch>& inliers, Mat homo)
 {
 	Mat best_model;
 	double best_err = 1e41;
@@ -213,12 +234,8 @@ void homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matche
 	vector<int> all_idx((int)matches.size());
 	INFO("matches# = %d", matches.size());
 	INFO("idx_size = %d", matches.size());
-	for (size_t i=0; i<all_idx.size(); i++) {
-		all_idx[i] = (int)i;
-	}
 	Mat all_src, all_dst;
-	matches_idx_to_mat(src_img_idx, keypoints, matches, all_idx,
-			all_src, all_dst);
+	matches_to_mat(src_img_idx, keypoints, matches, all_src, all_dst);
 	//showFeature(all_src, all_dst, src_img_idx, matches[0].imgIdx);
 	cerr << "img_no " << src_img_idx << " " << matches[0].imgIdx << endl;
 
@@ -255,11 +272,11 @@ void homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matche
 			total_err /= (float)(size*size);
 			total_err += 20.f/(float)(size*size);
 			if (total_err < best_err) {
-				INFO("best err = %lf, #= %d", best_err, size);
 				best_err = total_err;
 				best_model = model;
 				best_inliers = samples_idx;
 				result = true;
+				INFO("best err = %lf, #= %d", best_err, size);
 			}
 		}
 	}
@@ -274,14 +291,17 @@ void homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matche
 		cout << best_model << endl;
 		homo = best_model;
 	}
+	return result;
 }
 
 bool is_model_valid(int n_inlier, int n_matches)
 {
-	return n_inlier > 5.9+0.22*n_matches;
+//	return n_inlier > 5.9+0.22*n_matches;
+//	FIXME calculate ``overlaped area''
+	return n_inlier > 5.9+0.11*n_matches;
 }
 
-vector<vector<DMatch> >* validate_matches(int src_img_idx, vector<Mat>& keypoints, vector<vector<DMatch> >& matches)
+vector<vector<DMatch> >* validate_neighbors(int src_img_idx, vector<Mat>& keypoints, vector<vector<DMatch> >& neighbors)
 {
 	float good_err = 1e2;
 	int good_n= 10;
@@ -289,13 +309,16 @@ vector<vector<DMatch> >* validate_matches(int src_img_idx, vector<Mat>& keypoint
 
 	vector<vector<DMatch> > *valid_matches;
 	valid_matches = new vector<vector<DMatch> >();
-	for (size_t i=0; i<matches.size(); i++) {
+	for (size_t i=0; i<neighbors.size(); i++) {
 		vector<DMatch> inliers, outliers;
 		Mat homo;
-		homo_ransac (src_img_idx, keypoints, matches[i], 
+		bool result = homo_ransac (src_img_idx, keypoints, neighbors[i], 
 				good_err, good_n, max_iter,
 				inliers, homo);
-		if (is_model_valid((int)inliers.size(), (int)matches[i].size())) {
+		if (!result) {
+			continue;
+		}
+		if (is_model_valid((int)inliers.size(), (int)neighbors[i].size())) {
 			valid_matches->push_back(inliers);
 			INFO ("### validated ###");
 		} else {
@@ -305,10 +328,174 @@ vector<vector<DMatch> >* validate_matches(int src_img_idx, vector<Mat>& keypoint
 	return valid_matches;
 }
 
+struct MatchPair {
+	int src_img_idx, dst_img_idx;
+	Mat src_pt, dst_pt;
+};
+
+void flood_fill(vector<vector<MatchPair> >& graph, int idx, vector<bool>& visited, vector<int>& group, int &max_idx)
+{
+	int max_edges = 0;
+	deque<int> q;
+
+	visited[idx] = true;
+	q.push_back(idx);
+	while (!q.empty()) {
+		idx = q[0];
+		group.push_back(idx);
+		if (max_edges<(int)graph[idx].size()) {
+			max_edges = (int)graph[idx].size();
+			max_idx = idx;
+		}
+
+		q.pop_front();
+		for (size_t i=0; i<graph[idx].size(); i++) {
+			int dst = graph[idx][i].dst_img_idx;
+			if (!visited[dst]) {
+				visited[dst] = true;
+				q.push_back(dst);
+			}
+		}
+	}
+}
+
+void make_undirected_graph(vector<vector<MatchPair> >& graph)
+{
+	for (size_t i=0; i<graph.size(); i++) {
+		vector<MatchPair> &edges = graph[i];
+		int src_img_idx = (int)i;
+		for (size_t j=0; j<edges.size(); j++) {
+			MatchPair &node = edges[j];
+			int dst_img_idx = node.dst_img_idx;
+			int k;
+			vector<MatchPair> &dst_edges = graph[dst_img_idx];
+			for (k=0; k<(int)dst_edges.size(); k++) {
+				if (src_img_idx==dst_edges[k].dst_img_idx)
+					break;
+			}
+			if (k==(int)dst_edges.size()) {
+				MatchPair p;
+				p.src_img_idx = dst_img_idx;
+				p.dst_img_idx = src_img_idx;
+				p.src_pt = node.dst_pt;
+				p.dst_pt = node.src_pt;
+				dst_edges.push_back(p);
+			}
+		}
+	}
+}
+
+float update_Hi_pq(vector<vector<MatchPair> > &graph, int idx, vector<Mat> &homos, int p, int q)
+{
+	Mat &src_homo = homos[idx];
+	vector<MatchPair> &edges = graph[idx];
+	double nu=0, de=0, err=0;
+	for (size_t i=0; i<edges.size(); i++) {
+		MatchPair &pair = edges[i];
+		Mat &src = pair.src_pt;
+		Mat &dst = pair.dst_pt;
+		Mat &dst_homo = homos[pair.dst_img_idx];
+		Mat diff = src*src_homo - dst*dst_homo;
+		//cerr << "diff " << diff.rowRange(0, 10) << endl;
+		for (int j=0; j<diff.rows; j++) {
+			float d = diff.at<float>(j,q);
+			float x = src.at<float>(j,p);
+			nu += 1.*d*x;
+			de += 1.*x*x;
+			err += 1.*d*d;
+		}
+	}
+	if (abs(de)>1e-5) {
+		src_homo.at<float>(p,q) -= (float)(nu/de);
+	}
+	return (float)err;
+}
+
+/* update the elements of H_i
+ * 
+ */
+float solve_Hi_once(vector<vector<MatchPair> > &graph, int idx, vector<Mat> &homos)
+{
+	float err = 0;
+	for (int p=0; p<3; p++) {
+		for (int q=0; q<2; q++) {
+			err += update_Hi_pq(graph, idx, homos, p, q);
+		}
+	}
+	return err;
+}
+
+
+/* Bundle Adjustment using
+ * Least Square Coordinate Descent
+ *
+ * Denote
+ * 	* src_{i|m} as the matched query points of match m
+ * 	* dst_{j|m} as the matched train points of match m
+ * 	* H_i as the homographic transform i
+ * 	* H_{j} as the homographic transform j
+ * we minimize
+ * 	\sum_{\forall matches m} (src_{i|m}*H_{i} - dst_{j|m}*H_{j})^2 
+ * on
+ * 	H_{i}
+ * with a fixed staring point
+ * 	H_{base} = [1 0; 0 1; 0 0]
+ *
+ * We suppose the images are geographically consistent on a plane.
+ *
+ */
+void bundle_adjustment(vector<vector<MatchPair> >& graph, vector<Mat>& homos, vector<vector<int> >& groups, int max_iter)
+{
+	float _base_homo[] = {1,0, 0,1, 0,0};
+	Mat base_homo = Mat(3, 2, CV_32FC1, _base_homo);
+	homos = vector<Mat>(graph.size());
+	for(size_t i=0; i<homos.size(); i++) {
+		homos[i] = base_homo.clone();
+	}
+
+	make_undirected_graph(graph);
+
+	// Find groups
+	vector<bool> visited(graph.size(), false);
+	for (int i=0; i<(int)graph.size(); i++) {
+		if (0 == graph[i].size()) {
+			continue;
+		}
+		int idx = graph[i][0].src_img_idx;
+		if (visited[idx]) {
+			continue;
+		}
+		vector<int> group;
+		int base_idx;
+
+		flood_fill(graph, idx, visited, group, base_idx);
+		for (size_t i=0; i<group.size(); i++) {
+			visited[group[i]] = false;
+		}
+
+		// BFS from group base
+		group.clear();
+		flood_fill(graph, base_idx, visited, group, base_idx);
+		groups.push_back(group);
+	}
+
+	for (int i=0; i<max_iter; i++) {
+		for (size_t j=0; j<groups.size(); j++) {
+			vector<int> &group = groups[j];
+			for (size_t k=1; k<group.size(); k++) {
+				int idx = group[k];
+				float err = solve_Hi_once(graph, idx, homos);
+				INFO("err: %f", err);
+			}
+		}
+	}
+}
+
 void astich(int n_imgs, char** img_fnames)
 {
 	int n_feats = 4+1;
 	int n_connected_imgs = 6;
+	int bundle_max_iter = 500;
 	FlannBasedMatcher matcher;
 	vector<Mat> keypoints;
 	vector<Mat> descrs;
@@ -320,14 +507,29 @@ void astich(int n_imgs, char** img_fnames)
 	matcher.add (descrs);
 	matcher.train ();
 
-	vector<vector<DMatch> > matches;
+	vector<vector<MatchPair> > graph;
 
 	for (int i=0; i<n_imgs; i++) {
-		vector<vector<DMatch> > *img_matches = getConnectedImgFeat(
+		vector<vector<DMatch> > *neighbors = getConnectedImgFeat(
 			n_imgs, descrs, matcher, i, n_feats, n_connected_imgs);
-		vector<vector<DMatch> > *valid_matches = validate_matches (i, keypoints, *img_matches);
-		valid_matches = valid_matches;
+
+		vector<vector<DMatch> > *valid_neighbors 
+			= validate_neighbors (i, keypoints, *neighbors);
+
+		MatchPair node;
+		vector<MatchPair> node_edges;
+		for (int j=0; j<(int)valid_neighbors->size(); j++) {
+			matches_to_mat(i, keypoints, valid_neighbors->at(j), node.src_pt, node.dst_pt, true);
+			node.src_img_idx = i;
+			node.dst_img_idx = valid_neighbors->at(j).at(0).imgIdx;
+			node_edges.push_back(node);
+		}
+		graph.push_back(node_edges);
 	}
+
+	vector<Mat> homos;
+	vector<vector<int> > groups;
+	bundle_adjustment(graph, homos, groups, bundle_max_iter);
 
 
 	return;
@@ -344,7 +546,7 @@ int main(int argc, char **argv)
 	char **img_fnames = (char**)calloc(argc, sizeof(char*));
 	IMG_FNAME = img_fnames; //FIXME
 	int n_imgs = 0;
-//	argc = 3;
+	argc = 3;
 	for (int i=1; i<argc; i++) {
 		char *s = argv[i];
 		if (0==strcmp(s, "")){
