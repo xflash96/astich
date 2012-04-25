@@ -270,7 +270,7 @@ bool homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matche
 			}
 			int size = (int)samples_idx.size();
 			total_err /= (float)(size*size);
-			total_err += 20.f/(float)(size*size);
+			total_err += 40.f/(float)(size*size);
 			if (total_err < best_err) {
 				best_err = total_err;
 				best_model = model;
@@ -296,14 +296,13 @@ bool homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matche
 
 bool is_model_valid(int n_inlier, int n_matches)
 {
-//	return n_inlier > 5.9+0.22*n_matches;
+	return n_inlier > 5.9+0.22*n_matches;
 //	FIXME calculate ``overlaped area''
-	return n_inlier > 5.9+0.11*n_matches;
 }
 
 vector<vector<DMatch> >* validate_neighbors(int src_img_idx, vector<Mat>& keypoints, vector<vector<DMatch> >& neighbors)
 {
-	float good_err = 1e2;
+	float good_err = 1e3;
 	int good_n= 10;
 	int max_iter = 10000;
 
@@ -491,6 +490,133 @@ void bundle_adjustment(vector<vector<MatchPair> >& graph, vector<Mat>& homos, ve
 	}
 }
 
+void update_min_max(float* v, Mat& homo, float &min_x, float &min_y, float &max_x, float &max_y)
+{
+	Mat pt = Mat(1, 3, CV_32FC1, v);
+	pt *= homo;
+	cerr << pt << endl;
+	float x = pt.at<float>(0,0);
+	float y = pt.at<float>(0,1);
+
+	if (min_x>x) {
+		min_x = x;
+	}
+	if (min_y>y) {
+		min_y = y;
+	}
+	if (max_x<x) {
+		max_x = x;
+	}
+	if (max_y<y) {
+		max_y = y;
+	}
+}
+
+void stroke(Mat& m, Mat &w, int x, int y, Vec3f v)
+{
+	for (int i=-1; i<=1; i++) {
+		for (int j=-1; j<=1; j++) {
+			float weight = 1;//-0.25f*(float)abs(i)-0.25f*(float)abs(j);
+			m.at<Vec3f>(x+i,y+j) = v*weight;
+//			w.at<float>(x+i,y+j) += weight;
+		}
+	}
+}
+
+void blending(vector<Mat>& homos, vector<vector<int> >& groups)
+{
+	for (size_t i=0; i<groups.size(); i++) {
+		vector<int> &group = groups[i];
+		// Get canvas size
+		float min_x = 1e11f, min_y = 1e11f;
+		float max_x = -1e11f, max_y = -1e11f;
+		for (size_t j=0; j<group.size(); j++) {
+			int idx = group[j];
+			Mat img = imread(IMG_FNAME[idx], 1);
+			Mat homo = homos[idx];
+
+			float _down_left[] = {0, 0, 1};
+			update_min_max(_down_left, homo, min_x, min_y, max_x, max_y);
+			float _down_right[] = {(float)img.cols, 0, 1};
+			update_min_max(_down_right, homo, min_x, min_y, max_x, max_y);
+			float _up_left[] = {0, (float)img.rows, 1};
+			update_min_max(_up_left, homo, min_x, min_y, max_x, max_y);
+			float _up_right[] = {(float)img.cols, (float)img.rows, 1};
+			update_min_max(_up_right, homo, min_x, min_y, max_x, max_y);
+		}
+		min_x-=1, min_y-=1;
+		max_x+=1, max_y+=1;
+		float ox=-min_x, oy = -min_y;
+		int width = (int)(max_x-min_x)+1, height = (int)(max_y-min_y)+1;
+
+		Mat out = Mat(height, width, CV_32FC3);
+		Mat w = Mat(height, width, CV_32FC1);
+
+		INFO("width = %d, height = %d", width, height);
+
+		for (size_t j=0; j<group.size(); j++) {
+			int idx = group[j];
+			INFO("rendering %d", idx);
+			Mat img_orig = imread(IMG_FNAME[idx], 1);
+			Mat img;
+			img_orig.convertTo(img, CV_32FC3, 1/255.);
+			Mat homo = homos[idx];
+
+			for (int m=0; m<img.cols; m++) {
+				for (int n=0;  n<img.rows; n++) {
+					Mat pt = Mat(1,3,CV_32FC1);
+					pt.at<float>(0,0) = (float)m;
+					pt.at<float>(0,1) = (float)n;
+					pt.at<float>(0,2) = (float)1;
+					pt *= homo;
+					int x = (int)(pt.at<float>(0,0)+ox);
+					int y = (int)(pt.at<float>(0,1)+oy);
+					stroke(out, w, y, x, img.at<Vec3f>(n,m));
+				}
+			}
+
+#if 0
+			Mat oout = out.clone();
+			for (int m=0; m<out.cols; m++) {
+				for (int n=0; n<out.rows; n++) {
+					float weight = w.at<float>(n,m);
+					if (abs(weight) > 1e-3) {
+						Vec3f v = oout.at<Vec3f>(n,m);
+						v.val[0] /= weight;
+						v.val[1] /= weight;
+						v.val[2] /= weight;
+						oout.at<Vec3f>(n,m) = v;
+					}
+				}
+			}
+			imshow("oresult", oout);
+			imshow("w", w);
+			waitKey(0);
+#endif
+			imshow("result", out);
+			waitKey(0);
+		}
+		/*
+		for (int m=0; m<out.cols; m++) {
+			for (int n=0; n<out.rows; n++) {
+				float weight = w.at<float>(n,m);
+				if (abs(weight) > 1e-3) {
+					Vec3f v = out.at<Vec3f>(n,m);
+					v.val[0] /= weight;
+					v.val[1] /= weight;
+					v.val[2] /= weight;
+					out.at<Vec3f>(n,m) = v;
+				}
+			}
+		}
+		*/
+		out *= 255;
+		char fname[255];
+		sprintf(fname, "result%d.jpg", i);
+		imwrite(fname, out);
+	}
+}
+
 void astich(int n_imgs, char** img_fnames)
 {
 	int n_feats = 4+1;
@@ -530,6 +656,8 @@ void astich(int n_imgs, char** img_fnames)
 	vector<Mat> homos;
 	vector<vector<int> > groups;
 	bundle_adjustment(graph, homos, groups, bundle_max_iter);
+	
+	blending(homos, groups);
 
 
 	return;
@@ -546,7 +674,7 @@ int main(int argc, char **argv)
 	char **img_fnames = (char**)calloc(argc, sizeof(char*));
 	IMG_FNAME = img_fnames; //FIXME
 	int n_imgs = 0;
-	argc = 3;
+//	argc = 3;
 	for (int i=1; i<argc; i++) {
 		char *s = argv[i];
 		if (0==strcmp(s, "")){
