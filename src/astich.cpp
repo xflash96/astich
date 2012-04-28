@@ -12,6 +12,9 @@ using namespace std;
 
 char **IMG_FNAME;
 const float OO = 1e23f;
+float CURV = (float)M_PI/10;
+float IMG_WIDTH;
+float IMG_HEIGHT;
 Rect_<float> zero_border(OO, OO, 0, 0);
 
 void INFO(const char *tmpl, ...)
@@ -43,7 +46,7 @@ void InvCylinderProj(float &x, float &y, float theta, float h, float f)
 
 void CylinderWrap(Mat &dst, Mat &src, Mat &mask)
 {
-	float curv = (float)(M_PI/10);
+	float curv = CURV;
 	float f = (float)(src.cols/2./tan(curv));
 	float s = (float)(src.cols/2. / curv);
 	int width = src.cols, height = (int)(1.*src.rows/f*s);
@@ -72,8 +75,14 @@ void CylinderWrap(Mat &dst, Mat &src, Mat &mask)
 
 void readAndProjImg(int idx, Mat& img, Mat& mask)
 {
+	if (-1==access(IMG_FNAME[idx], F_OK)) {
+		INFO("File %s Not Found", IMG_FNAME[idx]);
+		exit(0);
+	}
 	Mat raw_img = imread(IMG_FNAME[idx], 1);
 	CylinderWrap(img, raw_img, mask);
+	IMG_WIDTH = (float)img.cols;
+	IMG_HEIGHT = (float)img.rows;
 	return;
 }
 
@@ -497,15 +506,24 @@ float update_Hi_pq(vector<vector<MatchPair> > &graph, int idx, vector<Mat> &homo
 			nu += 1.*d*x;
 			de += 1.*x*x;
 			err += 1.*d*d;
-			n += 1;
 		}
+		n += diff.rows;
 	}
 	if (abs(de)>1e-5) {
-		if (!(p==2 && q==0)) {
-			float c=1e1f;
-			nu /= n;
-			de /= n;
-			de += c;
+		if (p!=2) {
+			float c, of, c0 = 1e3;
+			if (q==0) {
+				c = IMG_WIDTH*IMG_WIDTH*c0;
+			} else {
+				c = IMG_HEIGHT*IMG_HEIGHT*c0;
+			}
+			if (p==q) {
+				of = 1;
+			} else {
+				of = 0;
+			}
+			nu -= of*(float)n;
+			de += c*(float)n;
 		}
 		src_homo.at<float>(p,q) -= (float)(nu/de);
 	}
@@ -518,7 +536,7 @@ float update_Hi_pq(vector<vector<MatchPair> > &graph, int idx, vector<Mat> &homo
 float solve_Hi_once(vector<vector<MatchPair> > &graph, int idx, vector<Mat> &homos)
 {
 	float err = 0;
-	for (int p=2; p<3; p++) {
+	for (int p=0; p<3; p++) {
 		for (int q=0; q<2; q++) {
 			err += update_Hi_pq(graph, idx, homos, p, q);
 		}
@@ -755,7 +773,11 @@ int main(int argc, char **argv)
 	//argc = 3;
 	for (int i=1; i<argc; i++) {
 		char *s = argv[i];
-		if (0==strcmp(s, "")){
+		if (0==strcmp(s, "-f")){
+			float de;
+			sscanf(argv[i+1], "%f", &de);
+			CURV = (float)M_PI/de;
+			i += 1;
 		}else{
 			img_fnames[n_imgs] = strdup(argv[i]);
 			//Mat img, w;
