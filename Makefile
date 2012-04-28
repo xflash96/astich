@@ -28,7 +28,7 @@ pack:
 	cp -rf test/demo/* ${PACK_NAME}/test/original
 	mkdir -p ${PACK_NAME}/test/matched
 	mkdir -p ${PACK_NAME}/test/stitched
-	mkdir -p ${PACK_NAME}/instruction
+	cp -f report/INSTRUCTION ${PACK_NAME}/
 	cp -rf report ${PACK_NAME}
 	mkdir -p ${PACK_NAME}/artifact/original
 	cp -rf test/maca_small/* ${PACK_NAME}/artifact/original
