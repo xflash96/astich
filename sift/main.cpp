@@ -13,7 +13,7 @@ int main( int argc, char *argv[] )
 	vector<DESCRIPT> fv1 ;
 	sift( fv1, img_src ) ;
 
-	Mat img = Mat::zeros( img_src.rows*2, img_src.cols, CV_8UC3 ) ;
+	Mat img = Mat::zeros( img_src.rows, img_src.cols*2, CV_8UC3 ) ;
 	//cvtColor( img_src, img_src, CV_RGB2GRAY ) ;
 	for( int i=0 ; i<img_src.rows ; i++ )
 		for( int j=0 ; j<img_src.cols ; j++ )
@@ -27,7 +27,7 @@ int main( int argc, char *argv[] )
 	//cvtColor( img_src, img_src, CV_RGB2GRAY ) ;
 	for( int i=0 ; i<img_src.rows ; i++ )
 		for( int j=0 ; j<img_src.cols ; j++ )
-			img.at<Vec3b>(i+img_src.rows,j) = img_src.at<Vec3b>(i,j) ;
+			img.at<Vec3b>(i, j+img_src.cols ) = img_src.at<Vec3b>(i,j) ;
 			//img.at<char>(i+img_src.rows,j) = img_src.at<char>(i,j) ;
 	cerr << img_src.rows << endl ;
 
@@ -63,11 +63,12 @@ int main( int argc, char *argv[] )
 		}
 		//if( fv1[i].x == 262 )
 		//	cout << "262 dis " << dis[0] << " " << dis[1] << endl;
-		if( dis[0]/dis[1]<0.8 )
+		if( dis[0]/dis[1]<0.8 && dis[0]<0.7 )
 		{
+			cerr << dis[0] << endl ;
 			//printf( "(%d,%d), (%d,%d), (%d, %d)\n", fv1[i].x, fv1[i].y, fv2[ idx[0] ].x, fv2[ idx[0] ].y, fv1[i].x+fv2[ idx[0] ].x, fv1[i].y+fv2[ idx[0] ].y ) ;
 			printf( "(%d,%d), (%d,%d)\n", fv1[i].x, fv1[i].y, fv2[ idx[0] ].x, fv2[ idx[0] ].y ) ;
-			cvLine(&qImg, cvPoint( fv1[i].y , fv1[i].x), cvPoint(fv2[ idx[0] ].y,  fv2[ idx[0] ].x+ img_src.rows  ), CV_RGB(0,255,0), 1);
+			cvLine(&qImg, cvPoint( fv1[i].y , fv1[i].x), cvPoint(fv2[ idx[0] ].y+img_src.cols,  fv2[ idx[0] ].x  ), CV_RGB(0,255,0), 1);
 		}
 	}
 	imwrite( argv[3], img ) ;

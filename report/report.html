@@ -37,12 +37,15 @@ level. For each level, it interpolates some layers to make the performance
 more robust. We use the function  to build them all. We can subject two
 consecutive layers to get DoGs for keypoint detection. We do it by GenerateDoG().
 
+{{ img/sift1.jpg | Build Scale Space ~||width=30%}}
 
 ==== Detect Keypoint
 After building pyramids on different scale level and getting the DoGs, we
 treat the local maximum across DoGs as the keypoints. To get a more robust
 keypoints, SIFT throws out the low contrast samples and eliminates the
 edges. We do it by DetectFeatures(), check_local_maximal() and is_low_contrast_or_edge().
+
+{{ img/sift2.jpg | Detect Keypoint ~||width=25%}}
 
 ==== Assign Orientation
 For each keypoint, we compute the orientation and magnitude of gradient of
@@ -52,11 +55,15 @@ filter on the gradient magnitudes. SIFT splits the orientation angels into
 36 bins, and do weighted voting the determine the major orientation . We do it by
 ComputeOrientation().
 
+{{ img/sift3.jpg | Assign Orientation ~||width=30%}}
+
 ==== Feature Extraction
 SIFT split the surrounding 16*16 windws into 16 4*4 small windows. FOr each
 window, it split the angels into 8 bins and do weighted voting on it. Notice 
 that the orientation is the relative orientation to the major orientation here.
 Hence we can get 16*8 = 128 features at the end. We do it by GenerateFeatures().
+
+{{ img/sift4.jpg | Feature Extraction ~||width=30%}}/
 
 === Some Practical issues and the difficuties we faced
 
@@ -81,6 +88,8 @@ resize method. Such simple resize method may be bi-linear or tri-linear
 by default in many libraries. The words pyramid implies the gaussian 
 filtering.
 
+{{ img/pyramid.gif | Pyramid ~||width=30%}}
+
 ==== Pre-smoothing
 Here are 2 times pre-smoothing in many practical guide ot implementation.
 First, before we doubling the original image for the base image in the 
@@ -93,6 +102,14 @@ As the throwing out low constrast samples in feature detections, for each
 candidate peak( local maximum and magnitude > 0.8*max peak ),we use its
 left and right neighbors to fit a downward parabola curve and fin the 
 position of maximum peak in that curve.
+
+== The Feature Matching
+Here is an example of the feature matching based on the feature extracted 
+by our SIFT implementation. The right image is shrinked and rotated from
+the right image. We only show the matched points in the figure. The rate of 
+mathing is around 60%.
+
+{{ img/result.jpg | Result ~||width=60%}}
 
 == Stiching
 We implemented full recognizing panoroma for stiching. Besides, we also
