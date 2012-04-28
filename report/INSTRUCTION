@@ -3,4 +3,4 @@ To make,
 
 To demo,
 	$ ./program/astich -f 11 test/original/* -o test/stiched/result \
-	  > ${PACK_NAME}/test/matched/matched.txt
+	  > test/matched/matched.txt
