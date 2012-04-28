@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Morphaca</title>
+    <title>Astich</title>
     <link href="css/bootstrap.min.css" rel="stylesheet"/>
   </head>
   <body>
@@ -13,7 +13,12 @@ In this homework, we implement the tool of stitching in C++ with openCV.
 The hierarchy of our source is
 
 {{{
-
+src/
+	astich.cpp
+	sift_lib.cpp
+	sift_lib.h
+	sift_demo.cpp
+	Makefile
 }}}
 == Feature Detection
 In this project, we implement Scale Invariant Feature Transform(SIFT) to extract
@@ -89,15 +94,166 @@ candidate peak( local maximum and magnitude > 0.8*max peak ),we use its
 left and right neighbors to fit a downward parabola curve and fin the 
 position of maximum peak in that curve.
 
-== A typical morphing result
+== Stiching
+We implemented full recognizing panoroma for stiching. Besides, we also
+create a new bundle adjustment algorithm with coordinate descent and
+regularized least square. It demos that global bundle adjustment won't 
+be the bottleneck of stiching algorithms. Here's the detail:
 
-{{ img/demo.gif | demo ~||width=30%}}
+=== Cylinderal Projection
+Before getting features, we use cylinder projection to distort. 
+We apply the projection to source images
+
+* \[\theta^\prime = s\theta = s\arctan(x,f)\]
+* \[h^\prime = sh = s\frac{y}{\sqrt{x*x+f*f}}\]
+
+with inverse wraping.
+
+Not to scale too much, we make the width after projection fixed and it
+leads to the following formula:
+
+* \[f = \frac{\text{width}}{\tan(\tau)}\]
+* \[s = \frac{\text{width}}{\tau}\]
+
+in which \(\tau\) is a factor that controls the distortion.
+
+=== Matching
+FLANN of Muja[2] is used to perform ANN matching in the SIFT space.
+
+=== Recognizing Panoromas
+We implemented Brown[2]. The basic idea is to run RANSAC to identify pairwise connections,
+and use a probablistic model inside the RANSAC to decide if a random consensus is good.
+After this, we could partition the input images to several connected groups.
+
+==== Feature Selection
+First, we use FLANN to choose the first 4 nearest neighbors of each features, 
+group them by image indexes pair. For each image, we will choose 6 neighbor
+images with the most matched features and drop others. For each image pair, RANSAC
+is used to determin inliers of matched features.
+
+==== RANSAC
+
+For each iteration, 3 points is choosed randomly. A homography model
+* \[x^\prime_0 = \( h_{00}\quad h_{01}\quad h_{02}\)^T \(x_0\quad x_1\quad 1\)\]
+* \[x^\prime_1 = \( h_{10}\quad h_{11}\quad h_{12}\)^T \(x_0\quad x_1\quad 1\)\]
+
+is built from those points. After this, we find inliers with reprojection errors.
+Then we find the regions of matched keypoints (in the projected space), and 
+calculate how many matched pairs are inside the regions. Then a probalistic model
+
+* \[n_{\text{inlier}} > 5.9 + 0.22 n_{\text{region}}\]
+
+is used to determin whether the model is good. We also set a lower bound limit that 
+
+* \[n_{\text{inlier}} > 50\]
+
+to prevent that there are too few inliers.
+
+If a model passed the test, we calculate a new model from these points and
+calculate the error by
+
+* \[\text{error} = \text{Average One Norm Reprojection Error} + 40/n_{inliers}\]
+
+and update the best model if the error is lower.
+
+=== Bundle Adjustment
+We run the coordinate descent on the least square model
+* \[\min_{H_i} \frac{1}{N}\sum_{k}(H_{i|k} x_{i|k} - H_{j|k} x_{j|k})^2 + \text{Regularization}\]
+* \[H_{\text{base}}=I\]
+
+in which
+
+* \(k\) is all the matched feature pair
+* \(H_i\) is the 6-D homographic projection from image i to the final canvas
+* \(H_{i|k}\) means the source homography matrix \(H_i\) of matched pair k
+* \(H_{j|k}\) means the destination homography matrix \(H_i\) of matched pair k
+* \(x_{i|k}, x_{j|k}\) is the matched keypoint pair
+* \(N\) is the number of matched pair
+* \(H_{\text{base}}\) is a fixed selected matrix.
+
+This solves for the minimal error after projection of feature points. However, drifting
+may still take place. We need regularization to instruct how should the distance be optimized.
+
+==== Regularization
+We take the square error of a homographic matrix from identity matrix as regularization:
+
+* \[\text{Regularization} = \sum_i C_0\((H_{i;00}-1)^2+H_{i;01}^2\)+C_1\(H_{i;10}^2+(H_{i;11}-1)^2\)\]
+
+On a horizontal panoroma, we could also regularize on \(H_{i;12}\), the y offset, to keep it small.
+
+On the choice of regularization factor \(C\), we use
+
+* \(C_0 = \text{width}^2\cdot 10^3\)
+* \(C_1 = \text{height}^2\cdot 10^3\)
+
+==== Coordinate Descent
+
+The updating rule is
+
+* \[H_{i;pq} -=  \frac{\sum_{k|i}(H_{i|k}x_{i|k}-H_{j|k}x_{j|k})_{p}\cdot x_{i|k;q}-[p==q]*N\cdot}{\sum_{k|i}x_{i|k;q}+C_p*N}\]
+
+in which
+
+* \({k|i}\) means all matched pairs that has the \(i\) keypoint
+* \([p==q]\) is 1 if p==q, 0 otherwise
+
+Note that in the implementation, the homography matrix is applied by \(xH\), so the index order might change.
+
+==== Update order
+
+From the beginning, all the \(H_i\) are initialized as identity matrix. 
+We choose the image with most links as the base, and fix the base matrix 
+
+By that the coordinate descent process could be thought as a error propagation
+process, we do a BFS from the base matrix, and sort them by the BFS order.
+
+=== Blending
+
+After we get all the homography matrix to the final canvas, we check the range of canvas by
+projection all the corner point back on the canvas.
+
+We use backward wrapping of the homograhy transform to paint the canvas.
+
+== Stiching Results
+
+=== denny
+{{ img/denny/result_small.jpg | denny}}
+
+=== csie
+{{ img/csie/result_small.jpg | denny}}
+
+=== recog - blend of denny, grail, and parrington
+{{ img/recog/result0.jpg | denny ~|50%}}
+{{ img/recog/result1.jpg | grail }}
+{{ img/recog/result2.jpg | parrington }}
+
+=== paramater
+|= | f (\(\tau=\pi/f\)) |
+| denny | 11 |
+| csie | 20 |
+| recog | 11 |
+
+
+== Artifacts - The Gaze of TA
+{{ img/maca/result.jpg | TA }}
+=== paramater
+|= | f (\(\tau=\pi/f\)) |
+| maca | 5.4 |
+
+== Bonus Point
+* Recognizing Paronoma
+* Coordinate Descent on Bundle Adjustment
 
 == Open Source
-The whole source, including a website GUI, is open source (by us) and you can do download it on internet.
+The whole source, including the report, is open source (by us) and you can do download it on internet.
 
-* [[https://github.com/xflash96/morphaca | Morphaca: A morphing library]]
+* [[https://github.com/xflash96/astich | Astich: Automatic Stiching Lib]]
 * [[https://github.com/xflash96/pyramid_mongo_rest | Web Framework]]
+
+== Reference
+* [1] Distinctive Image Features from Scale-Invariant Keypoints by David G. Lowe
+* [2] [[http://people.cs.ubc.ca/~mariusm/uploads/FLANN/flann_visapp09.pdf | Fast Approximate Nearest Neighbors with Automatic Algorithm Configuration]]
+* [3] [[http://faculty.cse.tamu.edu/jchai/CPSC641/iccv2003.pdf | Recognizing paronoma]] by M. Brown and D. G. Lowe
 
     </script>
     
@@ -109,7 +265,7 @@ The whole source, including a website GUI, is open source (by us) and you can do
             <span class="icon-bar"></span>
             <span class="icon-bar"></span>
           </a>
-          <a class="brand" href="#">Morphaca</a>
+          <a class="brand" href="#">Astich</a>
           <div class="nav-collapse">
             <ul class="nav">
               <li><a href="#report">Report</a></li>
@@ -175,6 +331,7 @@ The whole source, including a website GUI, is open source (by us) and you can do
     <script src="/static/js/bootstrap-popover.js"></script>
     <script src="/static/js/bootstrap-typeahead.js"></script>
     -->
+    <a href="http://github.com/xflash96/astich"><img style="position: absolute; top: 40px; right: 0; border: 0;" src="https://a248.e.akamai.net/camo.github.com/abad93f42020b733148435e2cd92ce15c542d320/687474703a2f2f73332e616d617a6f6e6177732e636f6d2f6769746875622f726962626f6e732f666f726b6d655f72696768745f677265656e5f3030373230302e706e67" alt="Fork me on GitHub"></a>
 
   </body>
 </html>
