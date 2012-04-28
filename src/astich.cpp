@@ -153,9 +153,9 @@ void showFeature(Mat& src, Mat& dst, int src_img_idx, int dst_img_idx)
 
 		//line(canvas, st, ed, color);
 	}
-	namedWindow("canvas", CV_WINDOW_AUTOSIZE);
-	imshow("canvas", canvas);
-	waitKey(0);
+	//namedWindow("canvas", CV_WINDOW_AUTOSIZE);
+	//imshow("canvas", canvas);
+	//waitKey(0);
 	//destroyWindow("canvas");
 }
 
@@ -731,9 +731,9 @@ void blending(vector<Mat>& homos, vector<vector<int> >& groups)
 
 			backward_homo_wrap(out, img, mask, homo, border);
 
-			namedWindow("result", CV_WINDOW_NORMAL);
-			imshow("result", out);
-			waitKey(100);
+			//namedWindow("result", CV_WINDOW_NORMAL);
+			//imshow("result", out);
+			//waitKey(100);
 		}
 		out *= 255;
 		char fname[255];

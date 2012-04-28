@@ -28,7 +28,7 @@ pack:
 	mkdir -p ${PACK_NAME}/test/original
 	cp -rf test/demo/* ${PACK_NAME}/test/original
 	mkdir -p ${PACK_NAME}/test/matched
-	mkdir -p ${PACK_NAME}/test/stitched
+	mkdir -p ${PACK_NAME}/test/stiched
 	cp -f report/INSTRUCTION ${PACK_NAME}/
 	cp -rf report ${PACK_NAME}
 	mkdir -p ${PACK_NAME}/artifact/original
