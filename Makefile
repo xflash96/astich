@@ -20,6 +20,7 @@ demo:
 PACK_NAME := B97902018_B97902058
 .PHONY: pack
 pack:
+	rm -rf ${PACK_NAME}
 	mkdir -p ${PACK_NAME}/program
 	cp -rf src/astich.cpp src/Makefile ${PACK_NAME}/program
 	cp sift/sift_lib.cpp sift/sift_lib.h ${PACK_NAME}/program
