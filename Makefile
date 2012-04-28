@@ -20,16 +20,20 @@ demo:
 PACK_NAME := B97902018_B97902058
 .PHONY: pack
 pack:
-	mkdir -f ${PACK_NAME}
-	cp -rf src ${PACK_NAME}/program
+	mkdir -p ${PACK_NAME}/program
+	cp -rf src/astich.cpp src/Makefile ${PACK_NAME}/program
+	cp sift/sift_lib.cpp sift/sift_lib.h ${PACK_NAME}/program
 	cd ${PACK_NAME}/program && make
-	mkdir -f ${PACK_NAME}/test
-	cp -rf test/demo ${PACK_NAME}/test/original
-	mkdir -f ${PACK_NAME}/test/matched
-	mkdir -f ${PACK_NAME}/test/stitched
-	mkdir -f ${PACK_NAME}/instruction
+	mkdir -p ${PACK_NAME}/test/original
+	cp -rf test/demo/* ${PACK_NAME}/test/original
+	mkdir -p ${PACK_NAME}/test/matched
+	mkdir -p ${PACK_NAME}/test/stitched
+	mkdir -p ${PACK_NAME}/instruction
 	cp -rf report ${PACK_NAME}
-	mkdir -f ${PACK_NAME}/artifact
+	mkdir -p ${PACK_NAME}/artifact/original
 	cp -rf test/maca_small/* ${PACK_NAME}/artifact/original
-	mkdir -f ${PACK_NAME}/artifact/stiched
+	mkdir -p ${PACK_NAME}/artifact/stiched
 	cp -rf report/img/maca/result.png ${PACK_NAME}/artifact/stiched
+	./${PACK_NAME}/program/astich -f 11 ${PACK_NAME}/test/original/* -o ${PACK_NAME}/test/stiched/result \
+		> ${PACK_NAME}/test/matched/matched.txt
+	tar czvf ${PACK_NAME}.tgz ${PACK_NAME}

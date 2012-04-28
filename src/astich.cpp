@@ -349,6 +349,7 @@ bool homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matche
 {
 	Mat best_model;
 	float best_err = OO;
+	int best_inliers_region = 0;
 	vector<int> best_inliers;
 	bool result = false;
 	//INFO("matches# = %d", matches.size());
@@ -406,6 +407,7 @@ bool homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matche
 				best_err = total_err;
 				best_model = model;
 				best_inliers = samples_idx;
+				best_inliers_region = n_region;
 				result = true;
 				//cerr << n_region << " " << n_valid << endl;
 			}
@@ -422,8 +424,11 @@ bool homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matche
 		Mat model = calc_homography(src, dst);
 		//showFeature(src, dst, src_img_idx, matches[0].imgIdx);
 
-		cerr << "img_no " << src_img_idx 
-			<< " " << matches[0].imgIdx << endl;
+		cout << "img " << src_img_idx 
+			<< " matched to img " << matches[0].imgIdx 
+			<< " with error " << best_err
+			<< "; inlier/region = " << best_inliers.size() 
+			<< "/" << best_inliers_region << endl;
 		INFO("best err = %lf, #= %d", best_err, best_inliers.size());
 		homo = best_model;
 	}
@@ -728,7 +733,7 @@ void blending(vector<Mat>& homos, vector<vector<int> >& groups)
 
 			namedWindow("result", CV_WINDOW_NORMAL);
 			imshow("result", out);
-			waitKey(0);
+			waitKey(100);
 		}
 		out *= 255;
 		char fname[255];
@@ -832,7 +837,7 @@ int main(int argc, char **argv)
 			img_fnames[n_imgs] = strdup(argv[i]);
 			//Mat img, w;
 			//readAndProjImg(n_imgs, img, w);
-			INFO("%d img = %s", n_imgs, argv[i]);
+			printf("%d img = %s\n", n_imgs, argv[i]);
 			n_imgs++;
 		}
 	}
