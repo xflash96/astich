@@ -40,6 +40,7 @@ void sift( vector<DESCRIPT> &descriptor, Mat &img_src )
 	GenerateFeatures( Layers, keypoint_list, descriptor ) ;
 
 
+#if 0
 	cerr << "Output\n" ;
 	Mat img1 ;
 	cvtColor(imgGray, img1, CV_GRAY2RGB);
@@ -73,6 +74,7 @@ void sift( vector<DESCRIPT> &descriptor, Mat &img_src )
 	}
 	cerr << "Feature num: " << f_n<< endl ;
 	imwrite( "/home/student/97/b97018/htdocs/f1.png", img1 ) ;
+#endif
 	
 	
 
