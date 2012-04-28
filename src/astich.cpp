@@ -4,12 +4,15 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdarg.h>
+#include <math.h>
 #include <opencv2/opencv.hpp>
 
 using namespace cv;
 using namespace std;
 
 char **IMG_FNAME;
+const float OO = 1e23f;
+Rect_<float> zero_border(OO, OO, 0, 0);
 
 void INFO(const char *tmpl, ...)
 {
@@ -26,11 +29,58 @@ int randint(int lower, int upper)
 	return lower+(int)(rand()*1./RAND_MAX*(upper-lower));
 }
 
-
-void getFeatures(Mat &img, vector<KeyPoint>& keypoints, Mat& descrs)
+void CylinderProj(float &theta, float &h, float f, float x, float y)
 {
-	SiftFeatureDetector detector(0.08,0.08);
-	detector.detect (img, keypoints);
+	theta = atan2(x, f);
+	h = y/sqrt(x*x+f*f);
+}
+
+void InvCylinderProj(float &x, float &y, float theta, float h, float f)
+{
+	x = f*tan(theta);
+	y = h*sqrt(x*x+f*f);
+}
+
+void CylinderWrap(Mat &dst, Mat &src, Mat &mask)
+{
+	float curv = (float)(M_PI/10);
+	float f = (float)(src.cols/2./tan(curv));
+	float s = (float)(src.cols/2. / curv);
+	int width = src.cols, height = (int)(1.*src.rows/f*s);
+
+	//cerr << height << " ; " << width << endl;
+	dst = Mat(height, width, CV_8UC3);
+	mask = Mat(height, width, CV_8UC1);
+	
+	int oi = -width/2, oj = -height/2;
+	int ox = src.cols/2, oy = src.rows/2;
+	for (int i=0; i<width; i++) {
+		for (int j=0; j<height; j++) {
+			float x, y;
+			InvCylinderProj(x,y,(float)(i+oi)/s,(float)(j+oj)/s,f);
+			int ix=(int)x+ox, iy=(int)y+oy;
+	//		cerr << i << "," << j << " " << x << "," << y << endl;
+			if (0<=ix && ix<src.cols && 0<=iy && iy<src.rows) {
+				dst.at<Vec3b>(j,i) = src.at<Vec3b>(iy,ix);
+				mask.at<uchar>(j,i) = 255;
+			} else {
+				mask.at<uchar>(j,i) = 0;
+			}
+		}
+	}
+}
+
+void readAndProjImg(int idx, Mat& img, Mat& mask)
+{
+	Mat raw_img = imread(IMG_FNAME[idx], 1);
+	CylinderWrap(img, raw_img, mask);
+	return;
+}
+
+void getFeatures(Mat &img, Mat &mask, vector<KeyPoint>& keypoints, Mat& descrs)
+{
+	SiftFeatureDetector detector;
+	detector.detect (img, keypoints, mask);
 	
 	SiftDescriptorExtractor extractor;
 	extractor.compute (img, keypoints, descrs);
@@ -38,15 +88,18 @@ void getFeatures(Mat &img, vector<KeyPoint>& keypoints, Mat& descrs)
 
 void showFeature(Mat& src, Mat& dst, int src_img_idx, int dst_img_idx)
 {
-	Mat src_img = imread(IMG_FNAME[src_img_idx]);
-	Mat dst_img = imread(IMG_FNAME[dst_img_idx]);
+	Mat src_img, src_mask; 
+	Mat dst_img, dst_mask; 
+	readAndProjImg(src_img_idx, src_img, src_mask);
+	readAndProjImg(dst_img_idx, dst_img, dst_mask);
 	Size size(src_img.cols+dst_img.cols, MAX(src_img.rows,dst_img.rows));
 	Mat canvas = Mat(size, CV_MAKETYPE(src_img.depth(), 3));
+	canvas = Scalar(0,0,0);
 	Mat offset = Mat(2,1,CV_32FC1);
 	Mat src_canvas = canvas(Rect(0,0,src_img.cols,src_img.rows));
 	Mat dst_canvas = canvas(Rect(src_img.cols,0,dst_img.cols,dst_img.rows));
-	src_img.copyTo(src_canvas);
-	dst_img.copyTo(dst_canvas);
+	src_img.copyTo(src_canvas, src_mask);
+	dst_img.copyTo(dst_canvas, dst_mask);
 
 	for (int i=0; i<(size_t)src.rows; i++) {
 		Point st, ed;
@@ -66,10 +119,12 @@ void showFeature(Mat& src, Mat& dst, int src_img_idx, int dst_img_idx)
 
 		ed.x += dst_img.cols;
 
-		line(canvas, st, ed, color);
+		//line(canvas, st, ed, color);
 	}
+	namedWindow("canvas", CV_WINDOW_AUTOSIZE);
 	imshow("canvas", canvas);
 	waitKey(100);
+	//destroyWindow("canvas");
 }
 
 /* Get All features from features_fname.
@@ -81,7 +136,7 @@ void getAllFeatures(int n_imgs, char** img_fnames, const char *features_fname, v
 	vector<KeyPoint> frame_keypoints;
 	Mat frame_descrs;
 	vector<Point2f> frame_keypoints_xy;
-	Mat img;
+	Mat img, mask;
 
 	if (features_fname && -1!=access(features_fname, F_OK)) {
 		FileStorage fs(features_fname, FileStorage::READ);
@@ -94,11 +149,11 @@ void getAllFeatures(int n_imgs, char** img_fnames, const char *features_fname, v
 	FileStorage fs(features_fname, FileStorage::WRITE);
 	for (int i=0; i<n_imgs; i++) {
 		INFO("reading %d frame", i);
-		img = imread(img_fnames[i]);
+		readAndProjImg(i, img, mask);
 
 		frame_keypoints.clear();
 		frame_keypoints_xy.clear();
-		getFeatures(img, frame_keypoints, frame_descrs);
+		getFeatures(img, mask, frame_keypoints, frame_descrs);
 		INFO("frame_keypoints.size = %d", frame_keypoints.size());
 
 		for (size_t j=0; j<frame_keypoints.size(); j++)
@@ -119,14 +174,14 @@ bool size_icmp(const vector<_T>& i, const vector<_T>& j)
 	return i.size()>j.size();
 }
 
-vector<vector<DMatch> >* getConnectedImgFeat(int n_imgs, vector<Mat> &descrs, FlannBasedMatcher& matcher, int i, int n_feats, int n_connected_imgs)
+vector<vector<DMatch> >* getConnectedImgFeat(int n_imgs, vector<Mat> &descrs, FlannBasedMatcher& matcher, int src_idx, int n_feats, int n_connected_imgs)
 {
 	vector<vector<DMatch> > *img_matches;
 	img_matches = new vector<vector<DMatch> >(n_imgs);
 	vector<vector<DMatch> > feat_matches;
 
-	INFO("pairing %d frame", i);
-	matcher.knnMatch (descrs[i], feat_matches, n_feats);
+	INFO("pairing %d frame", src_idx);
+	matcher.knnMatch (descrs[src_idx], feat_matches, n_feats);
 
 	// Group by imgIdx
 	for (size_t j=0; j<feat_matches.size(); j++) {
@@ -134,9 +189,9 @@ vector<vector<DMatch> >* getConnectedImgFeat(int n_imgs, vector<Mat> &descrs, Fl
 		for (size_t k=0; k<candid.size(); k++) { // skip self
 			int idx = candid[k].imgIdx;
 			assert(idx >= 0 && idx <n_imgs);
-			if (idx == i) // skip same frame
+			if (idx == src_idx) // skip same frame
 				continue;
-			(*img_matches)[idx].push_back(candid[k]);
+			img_matches->at(idx).push_back(candid[k]);
 		}
 	}
 
@@ -146,12 +201,13 @@ vector<vector<DMatch> >* getConnectedImgFeat(int n_imgs, vector<Mat> &descrs, Fl
 
 	img_matches->erase(img_matches->begin()+n_connected_imgs,
 			  img_matches->end());
-	for (int i=0; i<(int)img_matches->size(); i++) {
-		if (0==(int)(*img_matches)[i].size()) {
-			img_matches->erase(img_matches->begin()+i, img_matches->end());
+	INFO("");
+	for (int j=0; j<(int)img_matches->size(); j++) {
+		if (0==(int)img_matches->at(j).size()) {
+			img_matches->erase(img_matches->begin()+j, img_matches->end());
 			break;
 		}
-		INFO("%d->%d: %d", i, (*img_matches)[i][0].imgIdx, (int)(*img_matches)[i].size());
+		INFO("%d->%d: %d", src_idx, img_matches->at(j)[0].imgIdx, (int)(*img_matches)[j].size());
 	}
 	return img_matches;
 }
@@ -212,7 +268,33 @@ void matches_to_mat(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& mat
 	for (size_t i=0; i<matches.size(); i++) {
 		all_idxes.push_back((int)i);
 	}
-	matches_idx_to_mat(src_img_idx, keypoints, matches, all_idxes, src, dst, dst_homo);
+	matches_idx_to_mat(src_img_idx, keypoints, matches, all_idxes,
+			src, dst, dst_homo);
+}
+
+void update_rect(Mat &pt, Rect_<float> &rect)
+{
+	float x = pt.at<float>(0,0);
+	float y = pt.at<float>(0,1);
+
+	if (rect.x>x) {
+		rect.x = x;
+	}
+	if (rect.y>y) {
+		rect.y = y;
+	}
+	if (rect.width < x-rect.x) {
+		rect.width = x-rect.x;
+	}
+	if (rect.height < y-rect.y) {
+		rect.height = y-rect.y;
+	}
+}
+
+bool inside_rect(float x, float y, Rect_<float> rect)
+{
+	return rect.x<=x && x<=rect.x+rect.width
+		&& rect.y<=y && y<=rect.y+rect.height;
 }
 
 /* src*H = dst
@@ -224,20 +306,21 @@ Mat calc_homography(Mat& src, Mat &dst)
 	return (src.t()*src).inv()*src.t()*dst;
 }
 
+bool is_model_valid(int n_inlier, int n_region)
+{
+	return n_inlier > 5.9+0.22*n_region;
+}
+
 bool homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matches, float good_err, int good_n, int max_iter, vector<DMatch>& inliers, Mat homo)
 {
 	Mat best_model;
-	double best_err = 1e41;
+	float best_err = OO;
 	vector<int> best_inliers;
 	bool result = false;
-	// some lazy way to construct whole mat
-	vector<int> all_idx((int)matches.size());
-	INFO("matches# = %d", matches.size());
-	INFO("idx_size = %d", matches.size());
+	//INFO("matches# = %d", matches.size());
 	Mat all_src, all_dst;
 	matches_to_mat(src_img_idx, keypoints, matches, all_src, all_dst);
 	//showFeature(all_src, all_dst, src_img_idx, matches[0].imgIdx);
-	cerr << "img_no " << src_img_idx << " " << matches[0].imgIdx << endl;
 
 	for (int i=0; i<max_iter; i++) {
 		vector<int> samples_idx;
@@ -249,79 +332,90 @@ bool homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matche
 		Mat model = calc_homography(src, dst);
 
 		Mat diff = all_src*model-all_dst;
-		for (size_t j=0; j<(size_t)diff.rows; j++) {
-			float x = diff.at<float>((int)j,0);
-			float y = diff.at<float>((int)j,1);
+		Rect_<float> match_region = zero_border;
+		for (int j=0; j<diff.rows; j++) {
+			float x = diff.at<float>(j,0);
+			float y = diff.at<float>(j,1);
 			float err = x*x+y*y;
 			if (err<good_err) {
-				samples_idx.push_back((int)j);
+				samples_idx.push_back(j);
+
+				Mat pt = Mat(1, 2, CV_32FC1);
+				pt.at<float>(0,0) = all_dst.at<float>(j,0);
+				pt.at<float>(0,1) = all_dst.at<float>(j,1);
+				update_rect(pt, match_region);
 			}
 		}
-		if (samples_idx.size() > (size_t)good_n) {
+		int n_region = 0;
+		for (int j=0; j<diff.rows; j++) {
+			float x = all_dst.at<float>(j,0);
+			float y = all_dst.at<float>(j,1);
+			if (inside_rect(x, y, match_region)) {
+				n_region++;
+			}
+		}
+		int n_valid = (int)samples_idx.size();
+		if (n_valid >= good_n && is_model_valid(n_valid, n_region)) {
 			matches_idx_to_mat (src_img_idx, keypoints,
 					matches, samples_idx, src, dst);
 			model = calc_homography(src, dst);
-			diff = src*model-dst; //FIXME
+			diff = src*model-dst;
 			float total_err = 0;
 			for (size_t j=0; j<(size_t)diff.rows; j++) {
 				float x = diff.at<float>((int)j,0);
 				float y = diff.at<float>((int)j,1);
-				total_err += x*x+y*y;
+				total_err += (float)(abs(x)+abs(y));
 			}
-			int size = (int)samples_idx.size();
-			total_err /= (float)(size*size);
-			total_err += 40.f/(float)(size*size);
+			total_err /= (float)(n_valid);
+			total_err += 40.f/(float)(n_valid);
 			if (total_err < best_err) {
 				best_err = total_err;
 				best_model = model;
 				best_inliers = samples_idx;
 				result = true;
-				INFO("best err = %lf, #= %d", best_err, size);
+				//cerr << n_region << " " << n_valid << endl;
 			}
 		}
 	}
-	for (size_t i=0; i<best_inliers.size(); i++) {
-		inliers.push_back(matches[best_inliers[i]]);
-	}
 	if (result) {
+		for (size_t i=0; i<best_inliers.size(); i++) {
+			inliers.push_back(matches[best_inliers[i]]);
+		}
+
 		Mat src, dst;
 		matches_idx_to_mat (src_img_idx, keypoints,
 				matches, best_inliers, src, dst);
+		Mat model = calc_homography(src, dst);
 		showFeature(src, dst, src_img_idx, matches[0].imgIdx);
-		cout << best_model << endl;
+		waitKey(10);
+
+		cerr << "img_no " << src_img_idx 
+			<< " " << matches[0].imgIdx << endl;
+		INFO("best err = %lf, #= %d", best_err, best_inliers.size());
 		homo = best_model;
 	}
 	return result;
 }
 
-bool is_model_valid(int n_inlier, int n_matches)
-{
-	return n_inlier > 5.9+0.22*n_matches;
-//	FIXME calculate ``overlaped area''
-}
-
 vector<vector<DMatch> >* validate_neighbors(int src_img_idx, vector<Mat>& keypoints, vector<vector<DMatch> >& neighbors)
 {
-	float good_err = 1e3;
-	int good_n= 10;
-	int max_iter = 10000;
+	float good_err = 200;
+	int good_n= 50;
+	int ransac_max_iter = 2000;
 
 	vector<vector<DMatch> > *valid_matches;
 	valid_matches = new vector<vector<DMatch> >();
 	for (size_t i=0; i<neighbors.size(); i++) {
-		vector<DMatch> inliers, outliers;
+		vector<DMatch> inliers;
 		Mat homo;
 		bool result = homo_ransac (src_img_idx, keypoints, neighbors[i], 
-				good_err, good_n, max_iter,
+				good_err, good_n, ransac_max_iter,
 				inliers, homo);
-		if (!result) {
-			continue;
-		}
-		if (is_model_valid((int)inliers.size(), (int)neighbors[i].size())) {
+		if (result) {
+			//INFO ("### validated ###");
 			valid_matches->push_back(inliers);
-			INFO ("### validated ###");
 		} else {
-			INFO ("### out ###");
+			//INFO ("### out ###");
 		}
 	}
 	return valid_matches;
@@ -389,6 +483,7 @@ float update_Hi_pq(vector<vector<MatchPair> > &graph, int idx, vector<Mat> &homo
 	Mat &src_homo = homos[idx];
 	vector<MatchPair> &edges = graph[idx];
 	double nu=0, de=0, err=0;
+	int n=0;
 	for (size_t i=0; i<edges.size(); i++) {
 		MatchPair &pair = edges[i];
 		Mat &src = pair.src_pt;
@@ -402,9 +497,16 @@ float update_Hi_pq(vector<vector<MatchPair> > &graph, int idx, vector<Mat> &homo
 			nu += 1.*d*x;
 			de += 1.*x*x;
 			err += 1.*d*d;
+			n += 1;
 		}
 	}
 	if (abs(de)>1e-5) {
+		if (!(p==2 && q==0)) {
+			float c=1e1f;
+			nu /= n;
+			de /= n;
+			de += c;
+		}
 		src_homo.at<float>(p,q) -= (float)(nu/de);
 	}
 	return (float)err;
@@ -416,7 +518,7 @@ float update_Hi_pq(vector<vector<MatchPair> > &graph, int idx, vector<Mat> &homo
 float solve_Hi_once(vector<vector<MatchPair> > &graph, int idx, vector<Mat> &homos)
 {
 	float err = 0;
-	for (int p=0; p<3; p++) {
+	for (int p=2; p<3; p++) {
 		for (int q=0; q<2; q++) {
 			err += update_Hi_pq(graph, idx, homos, p, q);
 		}
@@ -478,47 +580,73 @@ void bundle_adjustment(vector<vector<MatchPair> >& graph, vector<Mat>& homos, ve
 		groups.push_back(group);
 	}
 
+	float err=0;
 	for (int i=0; i<max_iter; i++) {
 		for (size_t j=0; j<groups.size(); j++) {
 			vector<int> &group = groups[j];
 			for (size_t k=1; k<group.size(); k++) {
 				int idx = group[k];
-				float err = solve_Hi_once(graph, idx, homos);
-				INFO("err: %f", err);
+				err = solve_Hi_once(graph, idx, homos);
 			}
 		}
 	}
+	INFO("err: %f", err);
 }
 
-void update_min_max(float* v, Mat& homo, float &min_x, float &min_y, float &max_x, float &max_y)
+void get_homo_img_range(Mat &img, Mat &homo, Rect_<float> &rect)
 {
-	Mat pt = Mat(1, 3, CV_32FC1, v);
+	Mat pt;
+	
+	float _down_left[] = {0, 0, 1};
+	pt = Mat(1, 3, CV_32FC1, _down_left);
 	pt *= homo;
-	cerr << pt << endl;
-	float x = pt.at<float>(0,0);
-	float y = pt.at<float>(0,1);
+	update_rect(pt, rect);
 
-	if (min_x>x) {
-		min_x = x;
-	}
-	if (min_y>y) {
-		min_y = y;
-	}
-	if (max_x<x) {
-		max_x = x;
-	}
-	if (max_y<y) {
-		max_y = y;
-	}
+	float _down_right[] = {(float)img.cols, 0, 1};
+	pt = Mat(1, 3, CV_32FC1, _down_right);
+	pt *= homo;
+	update_rect(pt, rect);
+
+	float _up_left[] = {0, (float)img.rows, 1};
+	pt = Mat(1, 3, CV_32FC1, _up_left);
+	pt *= homo;
+	update_rect(pt, rect);
+
+	float _up_right[] = {(float)img.cols, (float)img.rows, 1};
+	pt = Mat(1, 3, CV_32FC1, _up_right);
+	pt *= homo;
+	update_rect(pt, rect);
 }
 
-void stroke(Mat& m, Mat &w, int x, int y, Vec3f v)
+void backward_homo_wrap(Mat &dst, Mat &src, Mat &mask, Mat &homo, Rect_<float> &dst_border)
 {
-	for (int i=-1; i<=1; i++) {
-		for (int j=-1; j<=1; j++) {
-			float weight = 1;//-0.25f*(float)abs(i)-0.25f*(float)abs(j);
-			m.at<Vec3f>(x+i,y+j) = v*weight;
-//			w.at<float>(x+i,y+j) += weight;
+	Rect_<float> border = zero_border;
+	get_homo_img_range(src, homo, border);
+	INFO("%f %f %f %f", border.x, border.y, border.width, border.height);
+	int width = (int)border.width, height = (int)border.height;
+	Mat inv_homo = Mat(homo, Rect(0,0,2,2)).inv();
+	float ox = homo.at<float>(2,0);
+	float oy = homo.at<float>(2,1);
+	for (int i=0; i<width; i++) {
+		for (int j=0; j<height; j++) {
+			int nx = (int)(1.*i+border.x-dst_border.x);
+			int ny = (int)(1.*j+border.y-dst_border.y);
+			Mat pt = Mat(1,2, CV_32FC1);
+			pt.at<float>(0,0) = (float)i+border.x-ox;
+			pt.at<float>(0,1) = (float)j+border.y-oy;
+			pt *= inv_homo;
+			int ix = (int)pt.at<float>(0,0);
+			int iy = (int)pt.at<float>(0,1);
+			if (0<=ix && ix<src.cols && 0<=iy && iy<src.rows
+				&& 0<=nx && nx< dst.cols
+				&& 0<=ny && ny< dst.rows
+				&& mask.at<uchar>(iy,ix)>0) {
+				float *dst_v = dst.at<Vec3f>(ny,nx).val;
+				float *src_v = src.at<Vec3f>(iy,ix).val;
+				dst_v[0] = src_v[0];
+				dst_v[1] = src_v[1];
+				dst_v[2] = src_v[2];
+			}
 		}
 	}
 }
@@ -528,91 +656,41 @@ void blending(vector<Mat>& homos, vector<vector<int> >& groups)
 	for (size_t i=0; i<groups.size(); i++) {
 		vector<int> &group = groups[i];
 		// Get canvas size
-		float min_x = 1e11f, min_y = 1e11f;
-		float max_x = -1e11f, max_y = -1e11f;
+		Rect_<float> border = zero_border;
 		for (size_t j=0; j<group.size(); j++) {
 			int idx = group[j];
-			Mat img = imread(IMG_FNAME[idx], 1);
+			Mat img, mask;
+			readAndProjImg(idx, img, mask);
 			Mat homo = homos[idx];
+			cerr << homo << endl;
 
-			float _down_left[] = {0, 0, 1};
-			update_min_max(_down_left, homo, min_x, min_y, max_x, max_y);
-			float _down_right[] = {(float)img.cols, 0, 1};
-			update_min_max(_down_right, homo, min_x, min_y, max_x, max_y);
-			float _up_left[] = {0, (float)img.rows, 1};
-			update_min_max(_up_left, homo, min_x, min_y, max_x, max_y);
-			float _up_right[] = {(float)img.cols, (float)img.rows, 1};
-			update_min_max(_up_right, homo, min_x, min_y, max_x, max_y);
+			get_homo_img_range(img, homo, border);
 		}
-		min_x-=1, min_y-=1;
-		max_x+=1, max_y+=1;
-		float ox=-min_x, oy = -min_y;
-		int width = (int)(max_x-min_x)+1, height = (int)(max_y-min_y)+1;
 
-		Mat out = Mat(height, width, CV_32FC3);
-		Mat w = Mat(height, width, CV_32FC1);
+		INFO("width = %f, height = %f", border.width, border.height);
+		INFO("ox = %f, oy = %f", border.x, border.y);
 
-		INFO("width = %d, height = %d", width, height);
+		Mat out = Mat(border.size(), CV_32FC3);
+		out = Scalar(255,0,0);
 
 		for (size_t j=0; j<group.size(); j++) {
 			int idx = group[j];
 			INFO("rendering %d", idx);
-			Mat img_orig = imread(IMG_FNAME[idx], 1);
-			Mat img;
-			img_orig.convertTo(img, CV_32FC3, 1/255.);
+			Mat raw_img, img, mask;
+			readAndProjImg(idx, raw_img, mask);
+			raw_img.convertTo(img, CV_32FC3, 1/255.);
 			Mat homo = homos[idx];
+			cerr << homo << endl;
 
-			for (int m=0; m<img.cols; m++) {
-				for (int n=0;  n<img.rows; n++) {
-					Mat pt = Mat(1,3,CV_32FC1);
-					pt.at<float>(0,0) = (float)m;
-					pt.at<float>(0,1) = (float)n;
-					pt.at<float>(0,2) = (float)1;
-					pt *= homo;
-					int x = (int)(pt.at<float>(0,0)+ox);
-					int y = (int)(pt.at<float>(0,1)+oy);
-					stroke(out, w, y, x, img.at<Vec3f>(n,m));
-				}
-			}
+			backward_homo_wrap(out, img, mask, homo, border);
 
-#if 0
-			Mat oout = out.clone();
-			for (int m=0; m<out.cols; m++) {
-				for (int n=0; n<out.rows; n++) {
-					float weight = w.at<float>(n,m);
-					if (abs(weight) > 1e-3) {
-						Vec3f v = oout.at<Vec3f>(n,m);
-						v.val[0] /= weight;
-						v.val[1] /= weight;
-						v.val[2] /= weight;
-						oout.at<Vec3f>(n,m) = v;
-					}
-				}
-			}
-			imshow("oresult", oout);
-			imshow("w", w);
-			waitKey(0);
-#endif
+			namedWindow("result", CV_WINDOW_NORMAL);
 			imshow("result", out);
 			waitKey(0);
 		}
-		/*
-		for (int m=0; m<out.cols; m++) {
-			for (int n=0; n<out.rows; n++) {
-				float weight = w.at<float>(n,m);
-				if (abs(weight) > 1e-3) {
-					Vec3f v = out.at<Vec3f>(n,m);
-					v.val[0] /= weight;
-					v.val[1] /= weight;
-					v.val[2] /= weight;
-					out.at<Vec3f>(n,m) = v;
-				}
-			}
-		}
-		*/
 		out *= 255;
 		char fname[255];
-		sprintf(fname, "result%d.jpg", i);
+		sprintf(fname, "result%d.jpg", (int)i);
 		imwrite(fname, out);
 	}
 }
@@ -674,12 +752,14 @@ int main(int argc, char **argv)
 	char **img_fnames = (char**)calloc(argc, sizeof(char*));
 	IMG_FNAME = img_fnames; //FIXME
 	int n_imgs = 0;
-//	argc = 3;
+	//argc = 3;
 	for (int i=1; i<argc; i++) {
 		char *s = argv[i];
 		if (0==strcmp(s, "")){
 		}else{
 			img_fnames[n_imgs] = strdup(argv[i]);
+			//Mat img, w;
+			//readAndProjImg(n_imgs, img, w);
 			INFO("%d img = %s", n_imgs, argv[i]);
 			n_imgs++;
 		}
