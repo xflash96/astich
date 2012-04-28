@@ -6,6 +6,7 @@
 #include <stdarg.h>
 #include <math.h>
 #include <opencv2/opencv.hpp>
+#include "sift_lib.h"
 
 using namespace cv;
 using namespace std;
@@ -16,6 +17,7 @@ float CURV = (float)M_PI/10;
 float IMG_WIDTH;
 float IMG_HEIGHT;
 Rect_<float> zero_border(OO, OO, 0, 0);
+char OUTPUT_PREFIX[255];
 
 void INFO(const char *tmpl, ...)
 {
@@ -88,11 +90,32 @@ void readAndProjImg(int idx, Mat& img, Mat& mask)
 
 void getFeatures(Mat &img, Mat &mask, vector<KeyPoint>& keypoints, Mat& descrs)
 {
+#define USE_MACACA_SIFT
+#ifndef USE_MACACA_SIFT
 	SiftFeatureDetector detector;
 	detector.detect (img, keypoints, mask);
 	
 	SiftDescriptorExtractor extractor;
 	extractor.compute (img, keypoints, descrs);
+#else
+	keypoints.clear();
+
+	vector<DESCRIPT> fv;
+	sift( fv, img) ;
+	descrs = Mat((int)fv.size(), 128, CV_32FC1);
+	for (size_t i=0; i<fv.size(); i++) {
+		DESCRIPT &des = fv[i];
+		vector<float> &feat = des.feature;
+		Point2f pt = Point2f((float)des.y, (float)des.x);
+		KeyPoint kp;
+		kp.pt = pt;
+		keypoints.push_back(kp);
+		for (size_t j=0; j<128; j++) {
+			descrs.at<float>((int)i,(int)j) = feat.at(j)*255;
+		}
+	}
+
+#endif
 }
 
 void showFeature(Mat& src, Mat& dst, int src_img_idx, int dst_img_idx)
@@ -132,7 +155,7 @@ void showFeature(Mat& src, Mat& dst, int src_img_idx, int dst_img_idx)
 	}
 	namedWindow("canvas", CV_WINDOW_AUTOSIZE);
 	imshow("canvas", canvas);
-	waitKey(100);
+	waitKey(0);
 	//destroyWindow("canvas");
 }
 
@@ -147,7 +170,7 @@ void getAllFeatures(int n_imgs, char** img_fnames, const char *features_fname, v
 	vector<Point2f> frame_keypoints_xy;
 	Mat img, mask;
 
-	if (features_fname && -1!=access(features_fname, F_OK)) {
+	if (false && features_fname && -1!=access(features_fname, F_OK)) {
 		FileStorage fs(features_fname, FileStorage::READ);
 		fs["keypoints"] >> keypoints;
 		fs["descrs"] >> descrs;
@@ -155,7 +178,7 @@ void getAllFeatures(int n_imgs, char** img_fnames, const char *features_fname, v
 		return;
 	}
 
-	FileStorage fs(features_fname, FileStorage::WRITE);
+	//FileStorage fs(features_fname, FileStorage::WRITE);
 	for (int i=0; i<n_imgs; i++) {
 		INFO("reading %d frame", i);
 		readAndProjImg(i, img, mask);
@@ -172,9 +195,11 @@ void getAllFeatures(int n_imgs, char** img_fnames, const char *features_fname, v
 		keypoints.push_back(frame_keypoints_mat);
 		descrs.push_back(frame_descrs);
 	}
+	/*
 	fs << "keypoints" << "[" << keypoints << "]";
 	fs << "descrs" << "[" << descrs << "]";
 	fs.release();
+	*/
 }
 
 template <class _T>
@@ -395,8 +420,7 @@ bool homo_ransac(int src_img_idx, vector<Mat>& keypoints, vector<DMatch>& matche
 		matches_idx_to_mat (src_img_idx, keypoints,
 				matches, best_inliers, src, dst);
 		Mat model = calc_homography(src, dst);
-		showFeature(src, dst, src_img_idx, matches[0].imgIdx);
-		waitKey(10);
+		//showFeature(src, dst, src_img_idx, matches[0].imgIdx);
 
 		cerr << "img_no " << src_img_idx 
 			<< " " << matches[0].imgIdx << endl;
@@ -708,7 +732,7 @@ void blending(vector<Mat>& homos, vector<vector<int> >& groups)
 		}
 		out *= 255;
 		char fname[255];
-		sprintf(fname, "result%d.jpg", (int)i);
+		sprintf(fname, "%s%d.png", OUTPUT_PREFIX, (int)i);
 		imwrite(fname, out);
 	}
 }
@@ -759,26 +783,52 @@ void astich(int n_imgs, char** img_fnames)
 	return;
 }
 
+void help(int argc, char **argv)
+{
+	printf(	"%s:\tAutomatic Stiching Tool\n\n"
+		"Usage: %s [-f FOCAL_LENGTH] [PICTURES...]\n"
+		"\t-f\tFocal length, default=10\n"
+		"\t-o\tOutput prefix, default=result\n"
+		"\t-h\tShow this text\n",
+		argv[0], argv[0]);
+}
+
 int main(int argc, char **argv)
 {
 	if (2>argc) {
-		printf(	"%s:\tAutomatic Stiching Tool"
-			"\t%s [PICTURES...]",
-			argv[0], argv[0]);
+		help(argc, argv);
 		exit(0);
 	}
+	strcpy(OUTPUT_PREFIX, "result");
 	char **img_fnames = (char**)calloc(argc, sizeof(char*));
-	IMG_FNAME = img_fnames; //FIXME
+	IMG_FNAME = img_fnames;
 	int n_imgs = 0;
 	//argc = 3;
 	for (int i=1; i<argc; i++) {
 		char *s = argv[i];
 		if (0==strcmp(s, "-f")){
 			float de;
-			sscanf(argv[i+1], "%f", &de);
+			if (1!=sscanf(argv[i+1], "%f", &de)) {
+				INFO("Focal length incorrect");
+				exit(1);
+			};
+			if (de <= 1e-3) {
+				INFO("Focal too small");
+				exit(1);
+			}
 			CURV = (float)M_PI/de;
 			i += 1;
-		}else{
+		} else if (0==strcmp(s, "-o")) {
+			if (1!=sscanf(argv[i+1], "%s", OUTPUT_PREFIX)) {
+				INFO("Output prefix incorrect");
+				exit(1);
+			}
+			i += 1;
+		} else if (0==strcmp(s, "-h") || 
+			   0==strcmp(s, "--help")){
+			help(argc, argv);
+			exit(0);
+		} else {
 			img_fnames[n_imgs] = strdup(argv[i]);
 			//Mat img, w;
 			//readAndProjImg(n_imgs, img, w);

@@ -1,3 +1,0 @@
-[submodule "ext/flann"]
-	path = ext/flann
-	url = git://github.com/mariusmuja/flann.git
